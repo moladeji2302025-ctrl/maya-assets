@@ -1,21 +1,23 @@
 /**
  * TexturePainter – UV-projected 3D texture painting engine.
- * Supports: Albedo, Roughness, Metalness, Emissive, Height→Normal channels.
- * Brush types: soft round, hard round, square, spray, smear, grunge, blob,
- *              hatching, dots, erase.
- * Layer system with blend modes. Undo stack. Normal map via Sobel from height.
+ *
+ * Performance notes vs original:
+ *  - TEX_SIZE halved to 1024 → 4× fewer pixels in every composite + GPU upload
+ *  - _composite() from _doPaint is deferred to rAF (at most 1 GPU upload/frame)
+ *  - _pushUndo / undo operates only on the active channel (was all 5)
+ *  - pointermove raycasting throttled to ≤ 90 fps
  */
 
 import * as THREE from 'three';
 
-export const TEX_SIZE = 2048;
+export const TEX_SIZE = 1024;
 
 export const CHANNELS = {
-  albedo:    { label: 'Albedo',       fill: '#808080', isColor: true,  srgb: true  },
-  roughness: { label: 'Roughness',    fill: '#808080', isColor: false, srgb: false },
-  metalness: { label: 'Metalness',    fill: '#000000', isColor: false, srgb: false },
-  emissive:  { label: 'Emissive',     fill: '#000000', isColor: true,  srgb: true  },
-  height:    { label: 'Height→Normal',fill: '#808080', isColor: false, srgb: false },
+  albedo:    { label: 'Albedo',        fill: '#808080', isColor: true,  srgb: true  },
+  roughness: { label: 'Roughness',     fill: '#808080', isColor: false, srgb: false },
+  metalness: { label: 'Metalness',     fill: '#000000', isColor: false, srgb: false },
+  emissive:  { label: 'Emissive',      fill: '#000000', isColor: true,  srgb: true  },
+  height:    { label: 'Height→Normal', fill: '#808080', isColor: false, srgb: false },
 };
 
 const BLEND_OPS = {
@@ -44,44 +46,43 @@ export class TexturePainter {
     this._targetItemId  = null;
     this._targetMeshes  = [];
 
-    // Composite output textures (drawn by _composite())
-    this._ch = {};   // channel → { canvas, ctx, texture }
-    // Paint layers per channel
+    this._ch         = {};  // channel → { canvas, ctx, texture }
     this._layers     = {};  // channel → Layer[]
     this._activeIdx  = {};  // channel → int
 
-    // Normal map from height
-    this._normCanvas  = null;
-    this._normCtx     = null;
-    this._normTex     = null;
+    this._normCanvas = null;
+    this._normCtx    = null;
+    this._normTex    = null;
 
     this.brush = {
-      type:            'round_soft',
-      channel:         'albedo',
-      color:           '#c47a3a',
-      value:           0.5,
-      size:            30,
-      opacity:         0.8,
-      hardness:        0.5,
-      flow:            1.0,
-      spacing:         0.25,
-      heightStrength:  4.0,
+      type:           'round_soft',
+      channel:        'albedo',
+      color:          '#c47a3a',
+      value:          0.5,
+      size:           30,
+      opacity:        0.8,
+      hardness:       0.5,
+      flow:           1.0,
+      spacing:        0.25,
+      heightStrength: 4.0,
     };
 
-    this._painting       = false;
-    this._lastStampUV    = null;
-    this._lastUV         = null;
-    this._strokeDir      = { x: 1, y: 0 };
+    this._painting      = false;
+    this._lastStampUV   = null;
+    this._lastUV        = null;
+    this._strokeDir     = { x: 1, y: 0 };
+    this._lastMoveMs    = 0;  // raycaster throttle
+
+    // RAF-deferred composite
+    this._dirtyChannels = new Set();
+    this._rafId         = null;
 
     this._undoStack = [];
     this._maxUndo   = 30;
     this._origMats  = new Map();
 
-    // Public callbacks
-    this.onChange = null;   // (event, channel) => void
+    this.onChange = null;
   }
-
-  // ── State ───────────────────────────────────────────────────────────────────
 
   get active()       { return this._active; }
   get targetItemId() { return this._targetItemId; }
@@ -102,26 +103,23 @@ export class TexturePainter {
 
     if (!this._targetMeshes.length) return false;
 
-    // Build channel canvases + initial base layers
     for (const ch of Object.keys(CHANNELS)) {
-      this._ch[ch]         = this._mkChannelCanvas(ch);
-      this._layers[ch]     = [];
-      this._activeIdx[ch]  = 0;
-      this._addLayerRaw(ch, 'Base', true);  // fill with default
+      this._ch[ch]        = this._mkChannelCanvas(ch);
+      this._layers[ch]    = [];
+      this._activeIdx[ch] = 0;
+      this._addLayerRaw(ch, 'Base', true);
     }
 
-    // Normal map canvas
-    this._normCanvas        = document.createElement('canvas');
-    this._normCanvas.width  = this._normCanvas.height = TEX_SIZE;
-    this._normCtx           = this._normCanvas.getContext('2d');
-    this._normTex           = new THREE.CanvasTexture(this._normCanvas);
+    this._normCanvas       = document.createElement('canvas');
+    this._normCanvas.width = this._normCanvas.height = TEX_SIZE;
+    this._normCtx          = this._normCanvas.getContext('2d');
+    this._normTex          = new THREE.CanvasTexture(this._normCanvas);
     this._normTex.colorSpace = THREE.LinearSRGBColorSpace;
     this._solveNormal();
 
-    // Replace materials with PBR that references our canvases
     this._targetMeshes.forEach(mesh => {
       this._origMats.set(mesh.uuid, mesh.material);
-      const mat = new THREE.MeshStandardMaterial({
+      mesh.material = new THREE.MeshStandardMaterial({
         map:          this._ch.albedo.texture,
         roughnessMap: this._ch.roughness.texture,
         roughness:    1.0,
@@ -132,8 +130,7 @@ export class TexturePainter {
         normalMap:    this._normTex,
         normalScale:  new THREE.Vector2(1, 1),
       });
-      mat.needsUpdate = true;
-      mesh.material   = mat;
+      mesh.material.needsUpdate = true;
     });
 
     this._active = true;
@@ -144,6 +141,8 @@ export class TexturePainter {
   deactivate() {
     if (!this._active) return;
     this._unbindEvents();
+    if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    this._dirtyChannels.clear();
     this._targetMeshes.forEach(mesh => {
       const orig = this._origMats.get(mesh.uuid);
       if (orig) mesh.material = orig;
@@ -155,7 +154,7 @@ export class TexturePainter {
     this._painting     = false;
   }
 
-  // ── Channel canvas setup ────────────────────────────────────────────────────
+  // ── Channel canvas ──────────────────────────────────────────────────────────
 
   _mkChannelCanvas(ch) {
     const canvas  = document.createElement('canvas');
@@ -163,8 +162,8 @@ export class TexturePainter {
     const ctx     = canvas.getContext('2d');
     ctx.fillStyle = CHANNELS[ch].fill;
     ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    const texture           = new THREE.CanvasTexture(canvas);
-    texture.colorSpace      = CHANNELS[ch].srgb ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
+    const texture       = new THREE.CanvasTexture(canvas);
+    texture.colorSpace  = CHANNELS[ch].srgb ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
     return { canvas, ctx, texture };
   }
 
@@ -174,10 +173,7 @@ export class TexturePainter {
     const canvas  = document.createElement('canvas');
     canvas.width  = canvas.height = TEX_SIZE;
     const ctx     = canvas.getContext('2d');
-    if (fillDefault) {
-      ctx.fillStyle = CHANNELS[ch].fill;
-      ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    }
+    if (fillDefault) { ctx.fillStyle = CHANNELS[ch].fill; ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE); }
     const layer = { name, canvas, ctx, opacity: 1.0, blendMode: 'Normal', visible: true };
     this._layers[ch].push(layer);
     this._activeIdx[ch] = this._layers[ch].length - 1;
@@ -186,7 +182,7 @@ export class TexturePainter {
 
   addLayer(ch, name = 'Layer') {
     const layer = this._addLayerRaw(ch, name, false);
-    this._composite(ch);
+    this._compositeNow(ch);
     this.onChange?.('layersChanged', ch);
     return layer;
   }
@@ -195,30 +191,26 @@ export class TexturePainter {
     if (this._layers[ch].length <= 1) return;
     this._layers[ch].splice(idx, 1);
     this._activeIdx[ch] = Math.min(idx, this._layers[ch].length - 1);
-    this._composite(ch);
+    this._compositeNow(ch);
     this.onChange?.('layersChanged', ch);
   }
 
-  setActiveLayer(ch, idx) {
-    this._activeIdx[ch] = idx;
-  }
-
-  getActiveLayer(ch) {
-    const idx = this._activeIdx[ch] ?? 0;
-    return this._layers[ch]?.[idx] ?? null;
-  }
+  setActiveLayer(ch, idx)  { this._activeIdx[ch] = idx; }
+  getActiveLayer(ch)       { return this._layers[ch]?.[this._activeIdx[ch] ?? 0] ?? null; }
+  getLayers(ch)            { return this._layers[ch] ?? []; }
 
   updateLayer(ch, idx, patch) {
     const layer = this._layers[ch]?.[idx];
     if (!layer) return;
     Object.assign(layer, patch);
-    this._composite(ch);
+    this._compositeNow(ch);
     this.onChange?.('layersChanged', ch);
   }
 
-  getLayers(ch) { return this._layers[ch] ?? []; }
+  // ── Compositing ─────────────────────────────────────────────────────────────
 
-  _composite(ch) {
+  // Immediate composite – used by layer ops (always snappy)
+  _compositeNow(ch) {
     const { ctx } = this._ch[ch];
     ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
     ctx.fillStyle = CHANNELS[ch].fill;
@@ -226,15 +218,26 @@ export class TexturePainter {
     for (const layer of this._layers[ch]) {
       if (!layer.visible) continue;
       ctx.save();
-      ctx.globalAlpha                = layer.opacity;
-      ctx.globalCompositeOperation   = BLEND_OPS[layer.blendMode] ?? 'source-over';
+      ctx.globalAlpha              = layer.opacity;
+      ctx.globalCompositeOperation = BLEND_OPS[layer.blendMode] ?? 'source-over';
       ctx.drawImage(layer.canvas, 0, 0);
       ctx.restore();
     }
     this._ch[ch].texture.needsUpdate = true;
   }
 
-  // ── Normal map from height (Sobel) ──────────────────────────────────────────
+  // Deferred composite – used during painting (max 1 GPU upload per rAF)
+  _scheduleComposite(ch) {
+    this._dirtyChannels.add(ch);
+    if (this._rafId) return;
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this._dirtyChannels.forEach(c => this._compositeNow(c));
+      this._dirtyChannels.clear();
+    });
+  }
+
+  // ── Normal map (Sobel on height) ────────────────────────────────────────────
 
   _solveNormal() {
     if (!this._ch.height) return;
@@ -271,8 +274,8 @@ export class TexturePainter {
   // ── Box UV fallback ─────────────────────────────────────────────────────────
 
   _genBoxUV(geo) {
-    const pos  = geo.attributes.position;
-    const uvs  = new Float32Array(pos.count * 2);
+    const pos = geo.attributes.position;
+    const uvs = new Float32Array(pos.count * 2);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
@@ -319,21 +322,24 @@ export class TexturePainter {
     const uv = this._hitUV(e);
     if (!uv) return;
     e.stopPropagation();
-    this._painting     = true;
-    this._lastStampUV  = uv.clone();
-    this._lastUV       = uv.clone();
-    this._strokeDir    = { x: 1, y: 0 };
+    this._painting    = true;
+    this._lastStampUV = uv.clone();
+    this._lastUV      = uv.clone();
+    this._strokeDir   = { x: 1, y: 0 };
     this._pushUndo();
     this._doPaint(uv, null);
   }
 
   _handleMove(e) {
-    if (!this._active) {
-      this.onChange?.('cursorMove', e);
-      return;
-    }
+    // Always update cursor overlay (cheap DOM op)
     this.onChange?.('cursorMove', e);
-    if (!this._painting) return;
+    if (!this._active || !this._painting) return;
+
+    // Throttle expensive raycasting to ≤ 90 fps
+    const now = performance.now();
+    if (now - this._lastMoveMs < 11) return;
+    this._lastMoveMs = now;
+
     const uv = this._hitUV(e);
     if (!uv) return;
     e.stopPropagation();
@@ -345,7 +351,8 @@ export class TexturePainter {
     }
 
     if (this._lastStampUV) {
-      const dx = uv.x - this._lastStampUV.x, dy = uv.y - this._lastStampUV.y;
+      const dx      = uv.x - this._lastStampUV.x;
+      const dy      = uv.y - this._lastStampUV.y;
       const dist    = Math.sqrt(dx * dx + dy * dy);
       const spacing = (this.brush.size / TEX_SIZE) * Math.max(0.01, this.brush.spacing);
       if (dist >= spacing) {
@@ -372,29 +379,30 @@ export class TexturePainter {
     const layer = this.getActiveLayer(ch);
     if (!layer) return;
 
-    const x    = uv.x * TEX_SIZE;
-    const y    = (1 - uv.y) * TEX_SIZE;
-    const r    = this.brush.size / 2;
+    const x   = uv.x * TEX_SIZE;
+    const y   = (1 - uv.y) * TEX_SIZE;
+    const r   = this.brush.size / 2;
     const grey = ch === 'roughness' || ch === 'metalness' || ch === 'height';
-    const col  = grey ? this._greyHex(this.brush.value) : this.brush.color;
-    const ctx  = layer.ctx;
+    const col = grey ? this._greyHex(this.brush.value) : this.brush.color;
+    const ctx = layer.ctx;
 
     ctx.save();
     switch (this.brush.type) {
-      case 'round_soft':  this._bSoft(ctx, x, y, r, col);              break;
-      case 'round_hard':  this._bHard(ctx, x, y, r, col);              break;
-      case 'square':      this._bSquare(ctx, x, y, r, col);            break;
-      case 'spray':       this._bSpray(ctx, x, y, r, col);             break;
-      case 'smear':       this._bSmear(ctx, layer.canvas, x, y, r, prevUV); break;
-      case 'grunge':      this._bGrunge(ctx, x, y, r, col);            break;
-      case 'blob':        this._bBlob(ctx, x, y, r, col);              break;
-      case 'hatching':    this._bHatch(ctx, x, y, r, col);             break;
-      case 'dots':        this._bDots(ctx, x, y, r, col);              break;
-      case 'erase':       this._bErase(ctx, x, y, r);                  break;
+      case 'round_soft': this._bSoft(ctx, x, y, r, col);                   break;
+      case 'round_hard': this._bHard(ctx, x, y, r, col);                   break;
+      case 'square':     this._bSquare(ctx, x, y, r, col);                  break;
+      case 'spray':      this._bSpray(ctx, x, y, r, col);                   break;
+      case 'smear':      this._bSmear(ctx, layer.canvas, x, y, r, prevUV); break;
+      case 'grunge':     this._bGrunge(ctx, x, y, r, col);                  break;
+      case 'blob':       this._bBlob(ctx, x, y, r, col);                    break;
+      case 'hatching':   this._bHatch(ctx, x, y, r, col);                   break;
+      case 'dots':       this._bDots(ctx, x, y, r, col);                    break;
+      case 'erase':      this._bErase(ctx, x, y, r);                        break;
     }
     ctx.restore();
 
-    this._composite(ch);
+    // Deferred composite – batched per rAF to prevent multiple GPU uploads per frame
+    this._scheduleComposite(ch);
   }
 
   // ── Brush implementations ───────────────────────────────────────────────────
@@ -420,7 +428,7 @@ export class TexturePainter {
   }
 
   _bSquare(ctx, x, y, r, col) {
-    const a = this.brush.opacity * this.brush.flow;
+    const a         = this.brush.opacity * this.brush.flow;
     const { x: dx, y: dy } = this._strokeDir;
     ctx.save();
     ctx.translate(x, y);
@@ -438,45 +446,40 @@ export class TexturePainter {
     for (let i = 0; i < count; i++) {
       const ang  = Math.random() * Math.PI * 2;
       const dist = Math.pow(Math.random(), 0.5) * r;
-      const px   = x + Math.cos(ang) * dist;
-      const py   = y + Math.sin(ang) * dist;
       ctx.fillStyle = this._rgba(col, a + Math.random() * a);
-      ctx.beginPath(); ctx.arc(px, py, 1 + Math.random() * 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + Math.cos(ang)*dist, y + Math.sin(ang)*dist, 1 + Math.random()*2, 0, Math.PI*2); ctx.fill();
     }
   }
 
   _bSmear(ctx, src, x, y, r, prevUV) {
     if (!prevUV) return;
-    const px = prevUV.x * TEX_SIZE;
-    const py = (1 - prevUV.y) * TEX_SIZE;
+    const px = prevUV.x * TEX_SIZE, py = (1 - prevUV.y) * TEX_SIZE;
     ctx.save();
     ctx.globalAlpha = this.brush.opacity * 0.55;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
-    ctx.drawImage(src, px - r * 1.3, py - r * 1.3, r * 2.6, r * 2.6, x - r, y - r, r * 2, r * 2);
+    ctx.drawImage(src, px - r*1.3, py - r*1.3, r*2.6, r*2.6, x - r, y - r, r*2, r*2);
     ctx.restore();
   }
 
   _bGrunge(ctx, x, y, r, col) {
-    const base = this.brush.opacity * this.brush.flow;
-    ctx.globalCompositeOperation = 'source-over';
+    const base  = this.brush.opacity * this.brush.flow;
     const count = 50 + Math.floor(r);
+    ctx.globalCompositeOperation = 'source-over';
     for (let i = 0; i < count; i++) {
       const ang  = Math.random() * Math.PI * 2;
       const dist = Math.pow(Math.random(), 0.3) * r;
-      const px   = x + Math.cos(ang) * dist;
-      const py   = y + Math.sin(ang) * dist;
       const sr   = r * (0.015 + Math.random() * 0.1);
       ctx.fillStyle = this._rgba(col, base * (0.15 + Math.random() * 0.85));
-      ctx.beginPath(); ctx.arc(px, py, sr, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + Math.cos(ang)*dist, y + Math.sin(ang)*dist, sr, 0, Math.PI*2); ctx.fill();
     }
   }
 
   _bBlob(ctx, x, y, r, col) {
-    const a = this.brush.opacity * this.brush.flow;
+    const a  = this.brush.opacity * this.brush.flow;
+    const pts = 7 + Math.floor(Math.random() * 5);
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = this._rgba(col, a);
     ctx.beginPath();
-    const pts = 7 + Math.floor(Math.random() * 5);
     for (let i = 0; i <= pts; i++) {
       const ang  = (i / pts) * Math.PI * 2;
       const vary = r * (0.5 + Math.random() * 0.9);
@@ -488,7 +491,7 @@ export class TexturePainter {
   }
 
   _bHatch(ctx, x, y, r, col) {
-    const a = this.brush.opacity * this.brush.flow;
+    const a         = this.brush.opacity * this.brush.flow;
     const { x: dx, y: dy } = this._strokeDir;
     ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = this._rgba(col, a);
@@ -497,22 +500,22 @@ export class TexturePainter {
     for (let i = -lines; i <= lines; i++) {
       const ox = -dy * i * 4, oy = dx * i * 4;
       ctx.beginPath();
-      ctx.moveTo(x + ox - dx * r, y + oy - dy * r);
-      ctx.lineTo(x + ox + dx * r, y + oy + dy * r);
+      ctx.moveTo(x + ox - dx*r, y + oy - dy*r);
+      ctx.lineTo(x + ox + dx*r, y + oy + dy*r);
       ctx.stroke();
     }
   }
 
   _bDots(ctx, x, y, r, col) {
-    const a = this.brush.opacity * this.brush.flow;
-    ctx.globalCompositeOperation = 'source-over';
+    const a  = this.brush.opacity * this.brush.flow;
     const sp = r * 0.28;
+    ctx.globalCompositeOperation = 'source-over';
     for (let oy = -r; oy <= r; oy += sp) {
       for (let ox = -r; ox <= r; ox += sp) {
-        if (ox * ox + oy * oy <= r * r) {
-          const falloff = 1 - Math.sqrt(ox * ox + oy * oy) / r;
+        if (ox*ox + oy*oy <= r*r) {
+          const falloff = 1 - Math.sqrt(ox*ox + oy*oy) / r;
           ctx.fillStyle = this._rgba(col, a * falloff);
-          ctx.beginPath(); ctx.arc(x + ox, y + oy, 1.8, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(x + ox, y + oy, 1.8, 0, Math.PI*2); ctx.fill();
         }
       }
     }
@@ -528,26 +531,23 @@ export class TexturePainter {
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   }
 
-  // ── Undo ────────────────────────────────────────────────────────────────────
+  // ── Undo (active channel only – much cheaper than all 5) ────────────────────
 
   _pushUndo() {
-    const snap = {};
-    for (const ch of Object.keys(CHANNELS)) {
-      const layer = this.getActiveLayer(ch);
-      if (layer) snap[ch] = layer.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
-    }
-    this._undoStack.push(snap);
+    const ch    = this.brush.channel;
+    const layer = this.getActiveLayer(ch);
+    if (!layer) return;
+    const img = layer.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
+    this._undoStack.push({ ch, img });
     if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
   }
 
   undo() {
     if (!this._undoStack.length) return;
-    const snap = this._undoStack.pop();
-    for (const [ch, img] of Object.entries(snap)) {
-      const layer = this.getActiveLayer(ch);
-      if (layer) { layer.ctx.putImageData(img, 0, 0); this._composite(ch); }
-    }
-    this._solveNormal();
+    const { ch, img } = this._undoStack.pop();
+    const layer = this.getActiveLayer(ch);
+    if (layer) { layer.ctx.putImageData(img, 0, 0); this._compositeNow(ch); }
+    if (ch === 'height') this._solveNormal();
     this.onChange?.('undo', null);
   }
 
@@ -561,7 +561,7 @@ export class TexturePainter {
     this._pushUndo();
     layer.ctx.fillStyle = color;
     layer.ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    this._composite(ch);
+    this._compositeNow(ch);
     if (ch === 'height') this._solveNormal();
   }
 
@@ -571,12 +571,10 @@ export class TexturePainter {
   exportNormal()    { return this._normCanvas?.toDataURL('image/png') ?? null; }
 
   exportAll() {
-    const result = {};
-    for (const ch of Object.keys(CHANNELS)) {
-      result[ch] = this.exportChannel(ch);
-    }
-    result.normal = this.exportNormal();
-    return result;
+    const out = {};
+    for (const ch of Object.keys(CHANNELS)) out[ch] = this.exportChannel(ch);
+    out.normal = this.exportNormal();
+    return out;
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

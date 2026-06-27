@@ -1,5 +1,5 @@
 """
-AI scene composer – wraps the Anthropic Claude API.
+AI scene composer – OpenRouter (OpenAI-compatible API).
 
 Provides:
     compose(prompt, scene, image_b64)         → scene layout dict (awaitable)
@@ -11,6 +11,7 @@ Provides:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import AsyncGenerator, Optional
@@ -22,29 +23,38 @@ if str(_BACKEND) not in sys.path:
 from config import settings
 
 try:
-    import anthropic  # type: ignore
-    _ANTHROPIC_OK = True
+    from openai import AsyncOpenAI  # type: ignore
+    _OPENAI_OK = True
 except ImportError:
-    _ANTHROPIC_OK = False
+    _OPENAI_OK = False
+
+_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+_TEXT_MODEL      = "openrouter/owl-alpha"
+_VISION_MODEL    = "google/gemma-4-26b-a4b-it:free"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _get_client() -> "anthropic.AsyncAnthropic":
-    if not _ANTHROPIC_OK:
-        raise RuntimeError("anthropic SDK not installed. Run: pip install anthropic")
-    key = settings.ANTHROPIC_API_KEY
+def _get_client() -> "AsyncOpenAI":
+    if not _OPENAI_OK:
+        raise RuntimeError("openai SDK not installed. Run: pip install openai")
+    key = settings.OPENROUTER_API_KEY
     if not key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set. "
-            "Set the environment variable before starting the server."
+            "OPENROUTER_API_KEY is not set. "
+            "Get a free key at openrouter.ai and add it to backend/.env"
         )
-    return anthropic.AsyncAnthropic(api_key=key)
+    return AsyncOpenAI(
+        base_url=_OPENROUTER_BASE,
+        api_key=key,
+        default_headers={
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Maya Asset Library",
+        },
+    )
 
 
 def _get_asset_catalog(limit: int = 3000) -> list[dict]:
-    """Return a compact asset list for Claude's context window."""
     from database.db import get_db
-
     conn = get_db()
     try:
         rows = conn.execute(
@@ -108,7 +118,6 @@ Respond with:
 - When placing object B on top of object A that you are **also adding** in the same response (not yet in the scene), estimate:
   - `A_surface_y = A.position.y + A.bbox_height × 0.01 × A.scale`
   - Then set `B.position.y = A_surface_y`
-  - Example: adding a table (bbox_height=74cm, pos.y=0, scale=1) and a lamp on it → lamp.position.y = 0.74
 - Objects placed **inside** a container (bowl, box, shelf) should have position.y slightly above the container's surface_y (add ~0.05–0.1 for a small object resting inside).
 - **Never** place all objects at y=0 when they are supposed to be stacked, mounted, or resting on each other.
 - Spread the scene naturally — don't pile everything at the origin.
@@ -120,9 +129,38 @@ Respond with:
 """
 
 
+def _build_messages(
+    prompt: str,
+    scene: dict,
+    image_b64: Optional[str],
+    system: str,
+) -> list[dict]:
+    messages: list[dict] = [{"role": "system", "content": system}]
+
+    scene_str = json.dumps(scene, indent=2) if scene else "{}"
+    text_content = (
+        f"Current scene state:\n{scene_str}\n\n"
+        f"User request: {prompt}"
+    )
+
+    if image_b64:
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                },
+                {"type": "text", "text": text_content},
+            ],
+        })
+    else:
+        messages.append({"role": "user", "content": text_content})
+
+    return messages
+
+
 def _parse_scene_actions(text: str) -> Optional[list]:
-    """Extract and parse the <scene_actions> JSON array from Claude's response."""
-    import re
     match = re.search(r"<scene_actions>(.*?)</scene_actions>", text, re.DOTALL)
     if not match:
         return None
@@ -133,6 +171,10 @@ def _parse_scene_actions(text: str) -> Optional[list]:
         return None
 
 
+def _strip_actions(text: str) -> str:
+    return re.sub(r"<scene_actions>.*?</scene_actions>", "", text, flags=re.DOTALL).strip()
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 async def compose(
@@ -140,109 +182,84 @@ async def compose(
     scene: dict,
     image_b64: Optional[str] = None,
 ) -> dict:
-    """
-    Generate a scene layout for *prompt*.
-    Returns {"message": str, "layout": dict | None, "raw": str}.
-    """
-    client = _get_client()
+    client  = _get_client()
     catalog = _get_asset_catalog()
-    system = _build_system_prompt(catalog)
+    system  = _build_system_prompt(catalog)
+    model   = _VISION_MODEL if image_b64 else _TEXT_MODEL
+    messages = _build_messages(prompt, scene, image_b64, system)
 
-    user_content: list = []
-    if image_b64:
-        user_content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64},
-        })
-
-    scene_str = json.dumps(scene, indent=2) if scene else "{}"
-    user_content.append({
-        "type": "text",
-        "text": (
-            f"Current scene state:\n{scene_str}\n\n"
-            f"User request: {prompt}"
-        ),
-    })
-
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
+    response = await client.chat.completions.create(
+        model=model,
         max_tokens=4096,
-        system=system,
-        messages=[{"role": "user", "content": user_content}],
+        messages=messages,
     )
 
-    raw = response.content[0].text
-    layout = _parse_scene_layout(raw)
-
-    # Strip the scene_layout block from the chat message
-    import re
-    message = re.sub(r"<scene_layout>.*?</scene_layout>", "", raw, flags=re.DOTALL).strip()
-
-    return {"message": message, "layout": layout, "raw": raw}
+    raw     = response.choices[0].message.content
+    actions = _parse_scene_actions(raw)
+    message = _strip_actions(raw)
+    return {"message": message, "actions": actions, "raw": raw}
 
 
 async def adjust(instruction: str, scene: dict) -> dict:
-    """
-    Adjust an existing scene based on *instruction*.
-    """
-    client = _get_client()
+    client  = _get_client()
     catalog = _get_asset_catalog()
-    system = _build_system_prompt(catalog)
+    system  = _build_system_prompt(catalog)
 
     scene_str = json.dumps(scene, indent=2)
-    user_text = (
-        f"Current scene:\n{scene_str}\n\n"
-        f"Adjustment requested: {instruction}\n\n"
-        "Update the scene layout according to the instruction. "
-        "Return the full updated layout in <scene_layout> tags."
-    )
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": (
+                f"Current scene:\n{scene_str}\n\n"
+                f"Adjustment requested: {instruction}\n\n"
+                "Apply the adjustment and return a <scene_actions> block."
+            ),
+        },
+    ]
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
+    response = await client.chat.completions.create(
+        model=_TEXT_MODEL,
         max_tokens=4096,
-        system=system,
-        messages=[{"role": "user", "content": user_text}],
+        messages=messages,
     )
 
-    raw = response.content[0].text
-    layout = _parse_scene_layout(raw)
-
-    import re
-    message = re.sub(r"<scene_layout>.*?</scene_layout>", "", raw, flags=re.DOTALL).strip()
-
-    return {"message": message, "layout": layout, "raw": raw}
+    raw     = response.choices[0].message.content
+    actions = _parse_scene_actions(raw)
+    message = _strip_actions(raw)
+    return {"message": message, "actions": actions, "raw": raw}
 
 
 async def suggest(context: str, scene: dict) -> dict:
-    """
-    Suggest additional assets based on current context/scene.
-    """
-    client = _get_client()
+    client  = _get_client()
     catalog = _get_asset_catalog()
-    system = _build_system_prompt(catalog)
+    system  = _build_system_prompt(catalog)
 
     scene_str = json.dumps(scene, indent=2)
-    user_text = (
-        f"Current scene:\n{scene_str}\n\n"
-        f"Context: {context}\n\n"
-        "Suggest 5–10 assets from the catalog that would complement this scene. "
-        "Return them as a JSON array in <scene_layout> tags with suggested positions."
-    )
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": (
+                f"Current scene:\n{scene_str}\n\n"
+                f"Context: {context}\n\n"
+                "Suggest 5–10 assets from the catalog that would complement this scene. "
+                "Return them as a <scene_actions> block with suggested add actions."
+            ),
+        },
+    ]
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
+    response = await client.chat.completions.create(
+        model=_TEXT_MODEL,
         max_tokens=2048,
-        system=system,
-        messages=[{"role": "user", "content": user_text}],
+        messages=messages,
     )
 
-    raw = response.content[0].text
-    layout = _parse_scene_layout(raw)
-
-    import re
-    message = re.sub(r"<scene_layout>.*?</scene_layout>", "", raw, flags=re.DOTALL).strip()
-
-    return {"message": message, "suggestions": layout.get("assets", []) if layout else [], "raw": raw}
+    raw     = response.choices[0].message.content
+    actions = _parse_scene_actions(raw)
+    message = _strip_actions(raw)
+    suggestions = [a for a in (actions or []) if a.get("action") == "add"]
+    return {"message": message, "suggestions": suggestions, "raw": raw}
 
 
 async def stream_compose(
@@ -254,10 +271,10 @@ async def stream_compose(
     Stream a scene composition as an async generator of chunk dicts.
 
     Yields:
-        {"type": "text",    "content": str}       — incremental text
-        {"type": "actions", "content": list}      — final parsed action list
-        {"type": "done"}                          — stream complete
-        {"type": "error",   "content": str}       — on failure
+        {"type": "text",    "content": str}   — incremental text
+        {"type": "actions", "content": list}  — final parsed action list
+        {"type": "done"}                      — stream complete
+        {"type": "error",   "content": str}   — on failure
     """
     try:
         client = _get_client()
@@ -265,36 +282,24 @@ async def stream_compose(
         yield {"type": "error", "content": str(exc)}
         return
 
-    catalog = _get_asset_catalog()
-    system = _build_system_prompt(catalog)
-
-    user_content: list = []
-    if image_b64:
-        user_content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64},
-        })
-
-    scene_str = json.dumps(scene, indent=2) if scene else "{}"
-    user_content.append({
-        "type": "text",
-        "text": (
-            f"Current scene state:\n{scene_str}\n\n"
-            f"User request: {prompt}"
-        ),
-    })
+    catalog  = _get_asset_catalog()
+    system   = _build_system_prompt(catalog)
+    model    = _VISION_MODEL if image_b64 else _TEXT_MODEL
+    messages = _build_messages(prompt, scene, image_b64, system)
 
     full_text = ""
     try:
-        async with client.messages.stream(
-            model="claude-sonnet-4-6",
+        stream = await client.chat.completions.create(
+            model=model,
             max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": user_content}],
-        ) as stream:
-            async for text_chunk in stream.text_stream:
-                full_text += text_chunk
-                yield {"type": "text", "content": text_chunk}
+            messages=messages,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                full_text += delta
+                yield {"type": "text", "content": delta}
 
         actions = _parse_scene_actions(full_text)
         if actions:

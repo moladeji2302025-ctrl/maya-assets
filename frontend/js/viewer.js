@@ -319,6 +319,32 @@ export function getItemMeshGroup(itemId) { return itemToMesh.get(itemId) ?? null
 export function getScene()  { return scene; }
 export function getCamera() { return camera; }
 
+export function getMeshGroupAtCursor(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const ndc  = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width)  * 2 - 1,
+    -((clientY - rect.top)  / rect.height) * 2 + 1,
+  );
+  raycaster.setFromCamera(ndc, camera);
+  const meshList = [];
+  itemToMesh.forEach(group => {
+    group.traverse(child => { if (child.isMesh) meshList.push(child); });
+  });
+  const hits = raycaster.intersectObjects(meshList, false);
+  if (!hits.length) return null;
+  const hit = hits[0].object;
+  let found = null;
+  itemToMesh.forEach(group => {
+    if (found) return;
+    let cur = hit;
+    while (cur) {
+      if (cur === group) { found = group; return; }
+      cur = cur.parent;
+    }
+  });
+  return found;
+}
+
 export function setPaintMode(enabled) {
   orbit.enabled = !enabled;
   if (enabled) transformCtrl.detach();

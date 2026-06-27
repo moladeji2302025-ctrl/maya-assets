@@ -31,8 +31,8 @@ class Settings:
     THUMBNAIL_DIR: str = "data/thumbnails"
     GLTF_DIR: str = "data/gltf"
 
-    # --- Anthropic ---
-    ANTHROPIC_API_KEY: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
+    # --- OpenRouter ---
+    OPENROUTER_API_KEY: str = field(default_factory=lambda: os.environ.get("OPENROUTER_API_KEY", ""))
 
     # --- Server ---
     HOST: str = "127.0.0.1"
