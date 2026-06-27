@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Maya Asset Library</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ TOPBAR ══ -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+      <path d="M2 17l10 5 10-5"/>
+      <path d="M2 12l10 5 10-5"/>
+    </svg>
+    <span>Maya Asset Library</span>
+  </div>
+
+  <div class="topbar-search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input id="search-input" type="text" placeholder="Search 3D assets…" autocomplete="off" />
+    <kbd>⌘K</kbd>
+  </div>
+
+  <div class="topbar-actions">
+    <!-- File menu -->
+    <div class="file-menu-wrap" id="file-menu-wrap">
+      <button class="mode-btn" id="btn-file-menu" title="Scene file operations">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+          <polyline points="13 2 13 9 20 9"/>
+        </svg>
+        Scene
+      </button>
+      <div class="file-menu-dropdown" id="file-menu-dropdown" style="display:none">
+        <button class="file-menu-item" id="fm-save-file">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save as File…
+        </button>
+        <button class="file-menu-item" id="fm-save-server">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="11" width="20" height="5" rx="1"/><line x1="6" y1="5.5" x2="6.01" y2="5.5"/><line x1="6" y1="13.5" x2="6.01" y2="13.5"/></svg>
+          Save to Library…
+        </button>
+        <button class="file-menu-item" id="fm-load-file">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Open File…
+        </button>
+        <button class="file-menu-item" id="fm-load-server">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="11" width="20" height="5" rx="1"/><line x1="6" y1="5.5" x2="6.01" y2="5.5"/><line x1="6" y1="13.5" x2="6.01" y2="13.5"/></svg>
+          Open from Library…
+        </button>
+        <div class="file-menu-sep"></div>
+        <button class="file-menu-item" id="fm-export-maya">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          Export to Maya (.py)
+        </button>
+        <button class="file-menu-item" id="fm-export-glb">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export as GLB…
+        </button>
+      </div>
+    </div>
+
+    <button id="btn-mode-manual" class="mode-btn active" title="Manual placement">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+      </svg>
+      Manual
+    </button>
+    <button id="btn-mode-ai" class="mode-btn" title="AI scene composition">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2a10 10 0 1 0 10 10"/>
+        <path d="m17 7 2-2 2 2-2 2-2-2z"/>
+      </svg>
+      AI Mode
+    </button>
+    <button id="btn-undo" class="icon-btn" title="Undo (Ctrl+Z)" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7v6h6"/><path d="M3 13A9 9 0 1 0 5.5 5.5L3 7"/>
+      </svg>
+    </button>
+    <button id="btn-catalog" class="icon-btn" title="Build catalog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/>
+      </svg>
+    </button>
+    <button id="btn-settings" class="icon-btn" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════ MAIN ════ -->
+<main class="workspace">
+
+  <!-- ─── LEFT: Category sidebar ─── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span>Categories</span>
+      <button class="icon-btn-sm" id="btn-sidebar-collapse" title="Collapse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M15 18l-6-6 6-6"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="category-tree" id="category-tree">
+      <div class="category-item active" data-category="">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        <span>All Assets</span>
+        <span class="cat-count" id="cat-count-all">–</span>
+      </div>
+      <!-- Dynamically populated -->
+    </nav>
+  </aside>
+
+  <!-- ─── CENTER-TOP: 3D Viewport ─── -->
+  <section class="center-panel">
+    <div class="viewport-container" id="viewport-container">
+      <canvas id="three-canvas"></canvas>
+
+      <!-- Viewport toolbar -->
+      <div class="viewport-toolbar">
+        <button class="vp-btn active" id="vp-btn-orbit" title="Orbit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+            <path d="M2 12h20"/>
+          </svg>
+        </button>
+        <button class="vp-btn" id="vp-btn-translate" title="Move (G)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M12 12h.01"/>
+          </svg>
+        </button>
+        <button class="vp-btn" id="vp-btn-rotate" title="Rotate (R)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+        </button>
+        <button class="vp-btn" id="vp-btn-scale" title="Scale (S)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+          </svg>
+        </button>
+        <div class="vp-sep"></div>
+        <button class="vp-btn" id="vp-btn-frame" title="Frame selection (F)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        </button>
+        <button class="vp-btn" id="vp-btn-snap" title="Toggle grid snap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 3h2v2H3zM3 10h2v2H3zM3 17h2v2H3zM10 3h2v2h-2zM10 10h2v2h-2zM10 17h2v2h-2zM17 3h2v2h-2zM17 10h2v2h-2zM17 17h2v2h-2z"/>
+          </svg>
+        </button>
+        <div class="vp-sep"></div>
+        <button class="vp-btn" id="vp-btn-lights" title="Lights panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18h6M10 22h4M12 2a7 7 0 0 1 7 7c0 2.5-1.3 4.7-3.3 6H8.3A6.96 6.96 0 0 1 5 9a7 7 0 0 1 7-7z"/>
+          </svg>
+        </button>
+        <button class="vp-btn" id="vp-btn-paint" title="Texture Paint (select an object first)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 19c-1 0-2-.4-2.7-1.1L3 11.6l1.4-1.4 1.1 1.1L9 7.8V6a3 3 0 1 1 6 0v1.8l3.5 3.5 1.1-1.1 1.4 1.4-6.3 6.3C14 18.6 13 19 12 19z"/>
+            <path d="M9 21h6"/>
+          </svg>
+        </button>
+        <div class="vp-sep"></div>
+        <button class="vp-btn danger" id="vp-btn-clear" title="Clear scene">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Selected asset info overlay -->
+      <div class="selection-info" id="selection-info" style="display:none">
+        <span id="sel-name">–</span>
+        <span class="sel-sep">|</span>
+        <span id="sel-pos">pos: 0, 0, 0</span>
+        <span class="sel-sep">|</span>
+        <button id="btn-separate" class="sel-action-btn" title="Separate into individual pieces (Alt+S)">
+          Separate pieces
+        </button>
+        <span id="sel-piece-count"></span>
+      </div>
+
+      <!-- Drop target overlay -->
+      <div class="drop-overlay" id="drop-overlay">
+        <div class="drop-overlay-inner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span>Drop asset into scene</span>
+        </div>
+      </div>
+      <!-- Lights panel (floating, right of viewport) -->
+      <div class="lights-panel" id="lights-panel" style="display:none">
+        <div class="lights-panel-header">
+          <span>Lights</span>
+          <div class="lights-panel-header-actions">
+            <button class="icon-btn-sm" id="btn-lights-helpers" title="Toggle light helpers">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+            <button class="icon-btn-sm" id="btn-lights-close" title="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="lights-add-row">
+          <select id="light-type-select" class="light-type-select">
+            <option value="ambient">Ambient</option>
+            <option value="directional">Directional (Sun)</option>
+            <option value="point">Point</option>
+            <option value="spot">Spot</option>
+            <option value="hemisphere">Hemisphere</option>
+            <option value="rectarea">Area (Rect)</option>
+          </select>
+          <button class="btn-primary btn-sm" id="btn-add-light">Add</button>
+        </div>
+        <div class="lights-list" id="lights-list"></div>
+        <div class="lights-properties" id="lights-properties"></div>
+      </div>
+      <!-- Paint panel (floating, left of viewport) -->
+      <div class="paint-panel" id="paint-panel" style="display:none">
+        <div class="paint-panel-header">
+          <span>Texture Paint</span>
+          <div class="paint-panel-header-actions">
+            <button class="icon-btn-sm" id="btn-paint-undo" title="Undo stroke" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M3 13A9 9 0 1 0 5.5 5.5L3 7"/></svg>
+            </button>
+            <button class="icon-btn-sm" id="btn-paint-close" title="Exit paint mode">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Channel tabs -->
+        <div class="paint-ch-tabs">
+          <button class="paint-ch-tab active" data-ch="albedo">Albedo</button>
+          <button class="paint-ch-tab" data-ch="roughness">Rough</button>
+          <button class="paint-ch-tab" data-ch="metalness">Metal</button>
+          <button class="paint-ch-tab" data-ch="emissive">Emissive</button>
+          <button class="paint-ch-tab" data-ch="height">Height</button>
+        </div>
+
+        <!-- Color picker row (color channels) -->
+        <div class="paint-prop-row" id="paint-color-row">
+          <label class="paint-label">Color</label>
+          <input type="color" id="paint-color" value="#c47a3a" class="paint-color-input" />
+        </div>
+
+        <!-- Value row (greyscale channels) -->
+        <div class="paint-prop-row" id="paint-value-row" style="display:none">
+          <label class="paint-label">Value</label>
+          <input type="range" id="paint-value" min="0" max="1" step="0.01" value="0.5" class="paint-slider" />
+          <span id="paint-value-val" class="paint-val-label">50%</span>
+        </div>
+
+        <!-- Height strength row -->
+        <div class="paint-prop-row" id="paint-hs-row" style="display:none">
+          <label class="paint-label">Normal Strength</label>
+          <input type="range" id="paint-hs" min="0.5" max="12" step="0.1" value="4" class="paint-slider" />
+          <span id="paint-hs-val" class="paint-val-label">4.0</span>
+        </div>
+
+        <!-- Brush type grid -->
+        <div class="paint-section-label">Brush</div>
+        <div class="paint-brush-grid" id="paint-brush-grid"></div>
+
+        <!-- Brush sliders -->
+        <div class="paint-sliders">
+          <div class="paint-prop-row">
+            <label class="paint-label">Size</label>
+            <input type="range" id="paint-size" min="2" max="200" step="1" value="30" class="paint-slider" />
+            <span id="paint-size-val" class="paint-val-label">30px</span>
+          </div>
+          <div class="paint-prop-row">
+            <label class="paint-label">Opacity</label>
+            <input type="range" id="paint-opacity" min="0" max="1" step="0.01" value="0.8" class="paint-slider" />
+            <span id="paint-opacity-val" class="paint-val-label">80%</span>
+          </div>
+          <div class="paint-prop-row">
+            <label class="paint-label">Hardness</label>
+            <input type="range" id="paint-hardness" min="0" max="0.99" step="0.01" value="0.5" class="paint-slider" />
+            <span id="paint-hardness-val" class="paint-val-label">50%</span>
+          </div>
+          <div class="paint-prop-row">
+            <label class="paint-label">Flow</label>
+            <input type="range" id="paint-flow" min="0.01" max="1" step="0.01" value="1" class="paint-slider" />
+            <span id="paint-flow-val" class="paint-val-label">100%</span>
+          </div>
+          <div class="paint-prop-row">
+            <label class="paint-label">Spacing</label>
+            <input type="range" id="paint-spacing" min="0.01" max="2" step="0.01" value="0.25" class="paint-slider" />
+            <span id="paint-spacing-val" class="paint-val-label">25%</span>
+          </div>
+        </div>
+
+        <!-- Layers -->
+        <div class="paint-section-label">
+          <span>Layers</span>
+          <div style="display:flex;gap:4px">
+            <button class="icon-btn-sm" id="btn-paint-fill" title="Fill layer with current color/value">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l2.29-2.29a1 1 0 0 0 0-1.41l-7.59-7.59a1 1 0 0 0-1.41 0L3 13a1 1 0 0 0 0 1.41L4.59 16"/><path d="M3 21h18"/></svg>
+            </button>
+            <button class="icon-btn-sm" id="btn-paint-add-layer" title="Add layer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="paint-layers-list" id="paint-layers-list"></div>
+
+        <!-- Export -->
+        <button class="btn-primary btn-sm paint-export-btn" id="btn-paint-export">Export All Maps</button>
+      </div>
+    </div>
+
+    <!-- ─── BOTTOM: Asset browser grid ─── -->
+    <div class="asset-browser" id="asset-browser">
+      <div class="browser-toolbar">
+        <span class="result-count" id="result-count">Loading…</span>
+        <div class="browser-toolbar-right">
+          <button class="icon-btn-sm active" id="btn-grid-view" title="Grid view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+              <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+          </button>
+          <button class="icon-btn-sm" id="btn-list-view" title="List view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/>
+              <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/>
+              <line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="asset-grid" id="asset-grid">
+        <div class="loading-spinner">
+          <div class="spinner"></div>
+          <span>Loading assets…</span>
+        </div>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </section>
+
+  <!-- ─── RIGHT: AI Panel ─── -->
+  <aside class="ai-panel" id="ai-panel">
+    <div class="ai-panel-header">
+      <div class="ai-panel-title">
+        <div class="ai-dot"></div>
+        <span>AI Scene Composer</span>
+      </div>
+      <button class="icon-btn-sm" id="btn-ai-clear" title="Clear chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-welcome">
+        <div class="chat-welcome-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a10 10 0 1 0 10 10"/>
+            <path d="m17 7 2-2 2 2-2 2-2-2z"/>
+          </svg>
+        </div>
+        <h3>AI Scene Composer</h3>
+        <p>Describe a scene, upload a reference image, or ask for suggestions.</p>
+        <div class="suggestion-pills">
+          <button class="pill" data-prompt="Create a cozy living room with warm lighting">Living room</button>
+          <button class="pill" data-prompt="Design a medieval castle courtyard">Castle courtyard</button>
+          <button class="pill" data-prompt="Modern kitchen with island and bar stools">Modern kitchen</button>
+          <button class="pill" data-prompt="Japanese zen garden with a small temple">Zen garden</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="image-preview-area" id="image-preview-area" style="display:none">
+        <img id="image-preview" src="" alt="Reference" />
+        <button id="btn-remove-image" class="remove-img-btn">✕</button>
+      </div>
+      <div class="chat-input-row">
+        <button class="icon-btn-sm" id="btn-upload-image" title="Upload reference image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+            <path d="M21 15l-5-5L5 21"/>
+          </svg>
+        </button>
+        <textarea id="chat-input" placeholder="Describe your scene…" rows="1"></textarea>
+        <button id="btn-chat-send" class="send-btn" title="Send (Enter)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+          </svg>
+        </button>
+      </div>
+      <input type="file" id="file-input" accept="image/*" style="display:none" />
+    </div>
+  </aside>
+
+</main>
+
+<!-- ═══════════════════════════════════════════════════ STATUS BAR ══ -->
+<footer class="statusbar" id="statusbar">
+  <span id="status-left">Ready</span>
+  <span id="status-right">0 assets in scene</span>
+</footer>
+
+<!-- ═══════════════════════════════════════════════════════ MODALS ══ -->
+
+<!-- Settings modal -->
+<div class="modal-overlay" id="modal-settings" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="icon-btn" id="btn-close-settings">✕</button>
+    </div>
+    <div class="modal-body">
+      <label>
+        <span>Anthropic API Key</span>
+        <input type="password" id="setting-api-key" placeholder="sk-ant-…" />
+      </label>
+      <label>
+        <span>Asset Path</span>
+        <input type="text" id="setting-asset-path" placeholder="E:/Assets/Assets-Models" />
+      </label>
+      <label>
+        <span>Grid Size</span>
+        <input type="number" id="setting-grid-size" value="1" min="0.1" step="0.1" />
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btn-save-settings">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Asset detail modal -->
+<div class="modal-overlay" id="modal-asset-detail" style="display:none">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h2 id="detail-name">Asset Detail</h2>
+      <button class="icon-btn" id="btn-close-detail">✕</button>
+    </div>
+    <div class="modal-body detail-body">
+      <div class="detail-preview" id="detail-preview"></div>
+      <div class="detail-info">
+        <div class="detail-row"><span>Category</span><span id="detail-category">–</span></div>
+        <div class="detail-row"><span>File</span><span id="detail-filename">–</span></div>
+        <div class="detail-row"><span>Size</span><span id="detail-filesize">–</span></div>
+        <div class="detail-row"><span>Polys</span><span id="detail-polycount">–</span></div>
+        <div class="detail-row"><span>Dimensions</span><span id="detail-dims">–</span></div>
+        <div class="detail-tags" id="detail-tags"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btn-detail-add">Add to Scene</button>
+      <button class="btn-secondary" id="btn-detail-convert">Convert to glTF</button>
+    </div>
+  </div>
+</div>
+
+<!-- Catalog builder modal -->
+<div class="modal-overlay" id="modal-catalog" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Build Asset Catalog</h2>
+      <button class="icon-btn" id="btn-close-catalog">✕</button>
+    </div>
+    <div class="modal-body">
+      <p>Scan <strong id="catalog-path">E:/Assets/Assets-Models</strong> and index all FBX files.</p>
+      <div class="progress-bar-wrap" id="catalog-progress-wrap" style="display:none">
+        <div class="progress-bar" id="catalog-progress-bar" style="width:0%"></div>
+      </div>
+      <pre class="log-output" id="catalog-log"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btn-start-catalog">Start Scan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ SCRIPTS ══ -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.167.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.167.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="js/scene-manager.js"></script>
+<script type="module" src="js/viewer.js"></script>
+<script type="module" src="js/browser.js"></script>
+<script type="module" src="js/ai-assistant.js"></script>
+<script type="module" src="js/app.js"></script>
+<script type="module" src="js/paint-init.js"></script>
+
+</body>
+</html>

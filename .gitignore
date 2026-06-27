@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Environment
+.env
+*.env.local
+
+# Database (runtime data, not source)
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node
+node_modules/
+
+# Logs
+*.log
